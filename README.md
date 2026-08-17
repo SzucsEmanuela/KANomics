@@ -16,13 +16,13 @@ The molecular profile of a cell is not an isolated state, but a dynamic function
 ### Input data & preprocessing state
 * **Source & Tissue:** Human colon tissue profiled via high-plex CODEX spatial proteomics.
 * **Single-Cell Processing State:** The pipeline accepts pre-processed single-cell data (derived from cell segmentation). Input protein markers contain **pre-calculated, Z-normalized signal intensities** across individual cells alongside spatial $X,Y$ coordinates.
-* **Spatial Feature Engineering:** KANomics builds upon these normalized intensities by querying spatial $k$-d trees ($r = 100\mu\text{m}$) to extract regional context features, such as local cell density, cell-type diversity, and neighborhood marker signal means.
+* **Spatial Feature Engineering:** KANomics builds upon these normalized intensities by querying spatial $k$-d trees to extract regional context features, such as local cell density, cell-type diversity, and neighborhood marker signal means.
 
 ---
 
 ## Key highlights
 
-* **Spatial microenvironment engineering:** Calculates local cell density, cell-type diversity, and neighborhood marker means using spatial $k$-d trees ($r = 100\mu\text{m}$).
+* **Spatial microenvironment engineering:** Calculates local cell density, cell-type diversity, and neighborhood marker means using spatial $k$-d trees.
 * **Quality control:** Clips extreme antibody aggregates (quantile clipping) and prunes spatial density anomalies using a $3.0 \times \text{IQR}$ rule.
 * **Predictive power:** Outperforms traditional Multi-Layer Perceptrons (MLPs) and Linear Models in predicting functional cell proliferation markers (e.g., **Ki67**).
 * **Transparent architecture:** Retains full feature interpretability post-pruning and supports symbolic mathematical extraction via `pykan`.
