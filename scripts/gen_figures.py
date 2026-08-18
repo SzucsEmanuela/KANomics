@@ -83,14 +83,12 @@ def run_linear_regression(dataset: Dict[str, torch.Tensor], target_protein: str)
     """Trains a baseline Simple Linear Regression model and evaluates performance."""
     print(f"Training Simple Linear Regression for {target_protein}...")
 
-    # Fit linear model on training data
     linear_model = LinearRegression()
     linear_model.fit(dataset["train_input"].numpy(), dataset["train_label"].numpy())
 
-    # Predict on test data
     raw_preds_scaled = linear_model.predict(dataset["test_input"].numpy())
 
-    # Fit scaler on TRAINING labels to prevent data leakage onto test evaluations
+    # fitting on training labels to prevent data leakage onto test evaluations
     scaler_y = StandardScaler()
     scaler_y.fit(dataset["train_label"].numpy())
 
@@ -141,7 +139,7 @@ def run_kan_regression(
     with torch.no_grad():
         raw_preds_scaled = model(dataset["test_input"]).cpu().numpy()
 
-    # Fit scaler on TRAINING labels to prevent data leakage onto test evaluations
+    # fitting on training labels to prevent data leakage onto test evaluations
     scaler_y = StandardScaler()
     scaler_y.fit(dataset["train_label"].numpy())
 
@@ -211,7 +209,7 @@ if __name__ == "__main__":
     torch.manual_seed(0)
 
     # Load data and initialized model
-    df, dataset, in_features = create_dataset_wo_outliers(DATA_PATH)
+    df, dataset, in_features = load_kanomics_dataset(DATA_PATH)
 
     kan_model = KAN(width=[len(in_features), 5, 1], grid=20, k=3, seed=42)
     kan_model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=DEVICE))
