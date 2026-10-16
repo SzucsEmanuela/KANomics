@@ -4,6 +4,7 @@ Generates performance comparisons (KAN vs Linear Regression and MLP), feature
 attribution plots, and symbolic regression outputs for protein targets.
 """
 
+import argparse
 import os
 from typing import Dict, List, Tuple
 import matplotlib
@@ -19,7 +20,9 @@ import torch
 
 import kan
 from kan import KAN
+from kanomics.config import add_data_args, run_name
 from kanomics.dataset import load_kanomics_dataset
+from kanomics.models import SimpleMLP
 
 matplotlib.use("Agg")
 
@@ -30,7 +33,12 @@ GOLD_COLOR = "#F7B80E"
 
 
 def evaluate_predictions(
-        y_true: np.ndarray, y_pred: np.ndarray, model_name: str, target_protein: str) -> Tuple[float, float, float]:
+        y_true: np.ndarray,
+        y_pred: np.ndarray,
+        model_name: str,
+        target_protein: str,
+        output_path: str = ".",
+) -> Tuple[float, float, float]:
     """Calculates regression metrics, prints them, and saves a standardized comparison plot.
 
     Args:
@@ -38,6 +46,7 @@ def evaluate_predictions(
         y_pred: Unscaled model predictions.
         model_name: Name of the model (e.g., 'KAN', 'Linear Regression').
         target_protein: Name of the target protein being predicted.
+        output_path: Directory for the plot.
 
     Returns:
         Tuple containing (R2 Score, MSE, MAE).
@@ -71,7 +80,9 @@ def evaluate_predictions(
     plt.ylabel(f"Predicted {target_protein} level", fontsize=16)
     plt.grid(True, linestyle="--", alpha=0.6)
 
-    output_filename = f"./vib_{model_name.lower().replace(' ', '_')}_{target_protein}.png"
+    output_filename = os.path.join(
+        output_path, f"vib_{model_name.lower().replace(' ', '_')}_{target_protein}.png"
+    )
     plt.savefig(output_filename, dpi=300, bbox_inches="tight")
     plt.close()
     print(f"Plot saved to: {output_filename}")
@@ -79,20 +90,21 @@ def evaluate_predictions(
     return r2, mse, mae
 
 
-def run_linear_regression(dataset: Dict[str, torch.Tensor], target_protein: str) -> None:
+def run_linear_regression(
+    dataset: Dict[str, torch.Tensor],
+    scaler_y: StandardScaler,
+    target_protein: str,
+    output_path: str = ".",
+) -> None:
     """Trains a baseline Simple Linear Regression model and evaluates performance."""
     print(f"Training Simple Linear Regression for {target_protein}...")
 
     linear_model = LinearRegression()
-    linear_model.fit(dataset["train_input"].numpy(), dataset["train_label"].numpy())
+    linear_model.fit(dataset["train_input"].cpu().numpy(), dataset["train_label"].cpu().numpy())
 
-    raw_preds_scaled = linear_model.predict(dataset["test_input"].numpy())
+    raw_preds_scaled = linear_model.predict(dataset["test_input"].cpu().numpy())
 
-    # fitting on training labels to prevent data leakage onto test evaluations
-    scaler_y = StandardScaler()
-    scaler_y.fit(dataset["train_label"].numpy())
-
-    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].numpy())
+    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].cpu().numpy())
     raw_preds_unscaled = scaler_y.inverse_transform(raw_preds_scaled)
 
     evaluate_predictions(
@@ -100,14 +112,17 @@ def run_linear_regression(dataset: Dict[str, torch.Tensor], target_protein: str)
         y_pred=raw_preds_unscaled,
         model_name="Linear Regression",
         target_protein=target_protein,
+        output_path=output_path,
     )
 
 
 def run_mlp_regression(
     dataset: Dict[str, torch.Tensor],
     model: torch.nn.Module,
+    scaler_y: StandardScaler,
     target_protein: str,
     device: str = "cpu",
+    output_path: str = ".",
 ) -> None:
     """Evaluates a trained MLP model on the test dataset."""
     model.eval()
@@ -117,10 +132,7 @@ def run_mlp_regression(
         test_inputs = dataset["test_input"].to(device)
         raw_preds_scaled = model(test_inputs).cpu().numpy()
 
-    scaler_y = StandardScaler()
-    scaler_y.fit(dataset["train_label"].numpy())
-
-    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].numpy())
+    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].cpu().numpy())
     raw_preds_unscaled = scaler_y.inverse_transform(raw_preds_scaled)
 
     evaluate_predictions(
@@ -128,22 +140,23 @@ def run_mlp_regression(
         y_pred=raw_preds_unscaled,
         model_name="MLP Regression",
         target_protein=target_protein,
+        output_path=output_path,
     )
 
 
 def run_kan_regression(
-    dataset: Dict[str, torch.Tensor], model: KAN, target_protein: str
+    dataset: Dict[str, torch.Tensor],
+    model: KAN,
+    scaler_y: StandardScaler,
+    target_protein: str,
+    output_path: str = ".",
 ) -> None:
     """Evaluates a pre-trained KAN model on the test dataset."""
     model.eval()
     with torch.no_grad():
         raw_preds_scaled = model(dataset["test_input"]).cpu().numpy()
 
-    # fitting on training labels to prevent data leakage onto test evaluations
-    scaler_y = StandardScaler()
-    scaler_y.fit(dataset["train_label"].numpy())
-
-    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].numpy())
+    y_test_unscaled = scaler_y.inverse_transform(dataset["test_label"].cpu().numpy())
     raw_preds_unscaled = scaler_y.inverse_transform(raw_preds_scaled)
 
     evaluate_predictions(
@@ -151,6 +164,7 @@ def run_kan_regression(
         y_pred=raw_preds_unscaled,
         model_name="KAN Regression",
         target_protein=target_protein,
+        output_path=output_path,
     )
 
 
@@ -200,25 +214,53 @@ def export_symbolic_expression(model: KAN, output_file: str = "symbolic_expressi
 
 
 if __name__ == "__main__":
-    # Configuration
-    DATA_PATH = "../23_09_CODEX_HuBMAP_alldata_Dryad_merged.csv"
-    MODEL_WEIGHTS_PATH = "../feats_5_1_grid20_kan_model_Ki67.pth"
-    TARGET_PROTEIN = "Ki67"
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_data_args(parser)
+    parser.add_argument("--kan-weights", default=None,
+                        help="KAN state dict (default: <out-dir>/kan_<run name>.pth from train_kan.py).")
+    parser.add_argument("--mlp-weights", default=None,
+                        help="MLP state dict (default: <out-dir>/mlp_<run name>.pth from train_mlp.py).")
+    args = parser.parse_args()
     DEVICE = "cpu"
 
     torch.manual_seed(0)
 
-    # Load data and initialized model
-    df, dataset, in_features = load_kanomics_dataset(DATA_PATH)
+    # Load data with the same configuration the models were trained on
+    df, dataset, in_features, preprocessing = load_kanomics_dataset(
+        args.data,
+        target_protein=args.target,
+        nrows=args.nrows,
+        target_mode=args.target_mode,
+        split=args.split,
+        test_donor=args.test_donor,
+    )
+    scaler_y = preprocessing["y"]
+    out_dir = args.out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    name = run_name(args.target, args.target_mode, args.split, preprocessing["test_donor"])
+    kan_path = args.kan_weights or os.path.join(out_dir, f"kan_{name}.pth")
+    mlp_path = args.mlp_weights or os.path.join(out_dir, f"mlp_{name}.pth")
 
-    kan_model = KAN(width=[len(in_features), 5, 1], grid=20, k=3, seed=42)
-    kan_model.load_state_dict(torch.load(MODEL_WEIGHTS_PATH, map_location=DEVICE))
-    kan_model = kan_model.to(DEVICE)
+    # Metrics and plots are in the original (Z-normalised) units of the target column
+    run_linear_regression(dataset, scaler_y, args.target, output_path=out_dir)
 
-    # Dry run pass to initialize activation shapes
-    kan_model(dataset["train_input"])
+    if os.path.exists(mlp_path):
+        mlp_state = torch.load(mlp_path, map_location=DEVICE)
+        mlp_model = SimpleMLP(len(in_features), mlp_state["fc1.weight"].shape[0])
+        mlp_model.load_state_dict(mlp_state)
+        run_mlp_regression(dataset, mlp_model, scaler_y, args.target, DEVICE, output_path=out_dir)
+    else:
+        print(f"No MLP weights at {mlp_path}; skipping MLP evaluation.")
 
-    # Run Evaluations & Plotting
-    run_kan_regression(dataset, kan_model, TARGET_PROTEIN)
-    run_linear_regression(dataset, TARGET_PROTEIN)
-    plot_feature_importance(in_features, kan_model, TARGET_PROTEIN)
+    if os.path.exists(kan_path):
+        kan_model = KAN(width=[len(in_features), 5, 1], grid=20, k=3, seed=42, auto_save=False)
+        kan_model.load_state_dict(torch.load(kan_path, map_location=DEVICE))
+        kan_model = kan_model.to(DEVICE)
+
+        # Dry run pass to initialize activation shapes
+        kan_model(dataset["train_input"])
+
+        run_kan_regression(dataset, kan_model, scaler_y, args.target, output_path=out_dir)
+        plot_feature_importance(in_features, kan_model, args.target, output_path=out_dir)
+    else:
+        print(f"No KAN weights at {kan_path}; skipping KAN evaluation.")

@@ -2,11 +2,15 @@
 KAN (Kolmogorov-Arnold Network) training, grid refinement, and pruning pipeline.
 """
 
+import argparse
+from pathlib import Path
 from typing import Dict, List, Tuple
 import torch
 import torch.nn as nn
 from sklearn.metrics import r2_score
 
+from kanomics.config import add_data_args, run_name
+from kanomics import kan_compat  # noqa: F401  (CPU least squares for pykan on CUDA)
 from kanomics.dataset import load_kanomics_dataset
 from kan import KAN
 
@@ -59,7 +63,10 @@ def train_kan_model(
     save_path: str = "kan_model_Ki67.pth",
 ) -> KAN:
     """Trains a KAN model with progressive grid refinement (grid 5 -> 10 -> 20)."""
-    model = KAN(width=[len(in_features), 5, 1], grid=5, k=3, seed=42)
+    model = KAN(
+        width=[len(in_features), 5, 1], grid=5, k=3, seed=42,
+        device=dataset['train_input'].device, ckpt_path=str(Path(save_path).parent / 'pykan_ckpt'),
+    )
 
     grid_schedule = [(5, 400), (10, 200), (20, 200)]
 
@@ -97,8 +104,12 @@ def fine_tune_kan_model(
 ) -> KAN:
     """Loads a pre-trained KAN, prunes unused nodes, and refines grid resolution."""
     print(f"Loading pre-trained KAN from {model_path}...")
-    model = KAN(width=[len(in_features), 5, 1], grid=20, k=3, seed=42)
-    model.load_state_dict(torch.load(model_path))
+    device = dataset['train_input'].device
+    model = KAN(
+        width=[len(in_features), 5, 1], grid=20, k=3, seed=42,
+        device=device, ckpt_path=str(Path(save_path).parent / 'pykan_ckpt'),
+    )
+    model.load_state_dict(torch.load(model_path, map_location=device))
     model(dataset['train_input'])  # Warmup activation shapes
 
     print("\n--- Pruning Model ---")
@@ -134,17 +145,30 @@ def fine_tune_kan_model(
 
 
 if __name__ == "__main__":
-    DATA_PATH = "./23_09_CODEX_HuBMAP_alldata_Dryad_merged.csv"
-    TARGET_PROTEIN = "Ki67"
+    parser = argparse.ArgumentParser(description=__doc__)
+    add_data_args(parser)
+    args = parser.parse_args()
 
     torch.manual_seed(0)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    df, dataset, in_features = load_kanomics_dataset(
-        csv_path=DATA_PATH, target_protein=TARGET_PROTEIN
+    df, dataset, in_features, preprocessing = load_kanomics_dataset(
+        args.data,
+        target_protein=args.target,
+        nrows=args.nrows,
+        target_mode=args.target_mode,
+        split=args.split,
+        test_donor=args.test_donor,
+        device=device,
     )
 
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    name = run_name(args.target, args.target_mode, args.split, preprocessing["test_donor"])
+    kan_path = out_dir / f"kan_{name}.pth"
+
     # Train initial KAN
-    kan_model = train_kan_model(dataset, in_features, save_path="../feats_5_1_grid20_kan_model_Ki67.pth")
+    kan_model = train_kan_model(dataset, in_features, save_path=kan_path)
 
     # Fine-tune / Prune
-    fine_tune_kan_model(dataset, "../feats_5_1_grid20_kan_model_Ki67.pth", in_features)
+    fine_tune_kan_model(dataset, kan_path, in_features, save_path=out_dir / f"kan_{name}_pruned.pth")

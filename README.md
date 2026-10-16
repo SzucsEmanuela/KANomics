@@ -16,28 +16,30 @@ The molecular profile of a cell is not an isolated state, but a dynamic function
 ### Input data & preprocessing state
 * **Source & Tissue:** Human colon tissue profiled via high-plex CODEX spatial proteomics.
 * **Single-Cell Processing State:** The pipeline accepts pre-processed single-cell data (derived from cell segmentation). Input protein markers contain **pre-calculated, Z-normalized signal intensities** across individual cells alongside spatial $X,Y$ coordinates.
-* **Spatial Feature Engineering:** KANomics builds upon these normalized intensities by querying spatial $k$-d trees to extract regional context features, such as local cell density, cell-type diversity, and neighborhood marker signal means.
+* **Spatial Feature Engineering:** KANomics builds upon these normalized intensities by querying spatial $k$-d trees (one per tissue region) to extract regional context features, such as local cell density, cell-type diversity, and neighborhood marker signal means. Coordinates are in pixels (~0.377 µm/px); the default radius of 100 px is about 38 µm. The centre cell is excluded from its own neighbourhood.
 
 ---
 
 ## Key highlights
 
-* **Spatial microenvironment engineering:** Calculates local cell density, cell-type diversity, and neighborhood marker means using spatial $k$-d trees.
-* **Quality control:** Clips extreme antibody aggregates (quantile clipping) and prunes spatial density anomalies using a $3.0 \times \text{IQR}$ rule.
-* **Predictive power:** Outperforms traditional Multi-Layer Perceptrons (MLPs) and Linear Models in predicting functional cell proliferation markers (e.g., **Ki67**).
+* **Spatial microenvironment engineering:** Calculates local cell density, cell-type diversity, and neighborhood marker means using per-region spatial $k$-d trees.
+* **Quality control:** Clips extreme antibody aggregates (quantile clipping, fitted on training cells) and prunes spatial density anomalies using a $3.0 \times \text{IQR}$ rule.
+* **Predictive power:** In the preliminary (poster) setting, outperforms traditional Multi-Layer Perceptrons (MLPs) and Linear Models in predicting niche-level proliferation (e.g., **Ki67**); see the note below the benchmark.
 * **Transparent architecture:** Retains full feature interpretability post-pruning and supports symbolic mathematical extraction via `pykan`.
 
 ---
 
 ## Performance benchmark
 
-Evaluating models on predicting continuous expression of **Ki67** across $100,000+$ single cells:
+Preliminary results (conference poster) on predicting **niche-level Ki67**: the mean Ki67 level of the cells within ~38 µm of each cell, from neighbourhood means of other markers, using a random cell-level train/test split on $150,000$ colon cells:
 
 | Model                            | $R^2$ score (Test) | MSE (Test)  |
 |:---------------------------------|:------------------:|:-----------:|
 | **Linear Regression**            |      $0.2900$      |  $0.7150$   |
 | **Multi-Layer Perceptron (MLP)** |      $0.5800$      |  $0.4200$   |
 | **KANomics (KAN)**               |     **0.7300**     | **0.2732**  |
+
+> **Note:** these numbers come from the original pipeline, which predicted the neighbourhood mean rather than each cell's own Ki67, built neighbourhoods across overlapping donor regions, and evaluated on a random cell split. The pipeline now defaults to single-cell targets and leave-one-donor-out evaluation; see [`docs/pipeline_fixes.md`](docs/pipeline_fixes.md) for the changes and updated results.
 
 ---
 
@@ -62,7 +64,8 @@ The feature engineering pipeline generates 12 input features capturing microenvi
 KANomics/
 ├── kanomics/                  # Core Python library
 │   ├── __init__.py
-│   ├── dataset.py             # Feature engineering & QC pipeline
+│   ├── config.py              # Repository paths and shared CLI options
+│   ├── dataset.py             # Feature engineering, QC, train/test splits
 │   ├── models.py              # Baseline model architectures (SimpleMLP)
 │
 ├── scripts/                   # Execution scripts
@@ -78,6 +81,8 @@ KANomics/
 └── README.md
 
 ```
+
+Run the scripts from the repository root, e.g. `PYTHONPATH=. python scripts/train_kan.py --target-mode cell --split donor --test-donor B004`. Models and figures are written to `outputs/`. Use `--target-mode niche --split cell` to reproduce the poster setting (with the per-region neighbourhood fix).
 ---
 
 ## Data availability
